@@ -1,5 +1,5 @@
 import discord
-from config import TOKEN
+from config import TOKEN, DRIVER_PATH
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from os.path import exists
@@ -44,9 +44,10 @@ def get_page(url):
     # options.add_argument("--no-sandbox")
     # options.add_argument("--disable-dev-shm-usage")
     # options.add_argument("--disable-gpu")
-
-    dr = webdriver.Chrome(options=options)
+    print("Starting driver")
+    dr = webdriver.Chrome(DRIVER_PATH, options=options)
     dr.get(url)
+    print("Got page")
 
     if WRITE_SOURCE_TO_FILE:
         with open("source_code.html", "w", encoding="utf-8") as f:
@@ -70,7 +71,7 @@ def get_game_status(game_name):
 
 
 async def send_game_status(game_name, channel):
-    print(f"Sending status for {game_name}")
+    print(f"Getting status for {game_name}")
     status = get_game_status(game_name)
     print(f"Got status for {game_name}")
 
