@@ -3,22 +3,28 @@ from config import TOKEN
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from os.path import exists
+from threading import Thread
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 BASE_URL = "https://downdetector.com/status/"
 tracked_games_file_name = "tracked_games.txt"
-
-if not exists(tracked_games_file_name):
-    with open(tracked_games_file_name, "w"):
-        pass
-    print("Created file")
-
-
-tracked_games = []
+WRITE_SOURCE_TO_FILE = False
 
 intents = discord.Intents.default()
 intents.message_content = True
 
 client = discord.Client(intents=intents)
+
+def create_file():
+    if not exists(tracked_games_file_name):
+        with open(tracked_games_file_name, "w"):
+            pass
+        print("Created file")
+
+
+def format_game_name(game_name):
+    return " ".join(game_name.split("-")).title()
 
 
 def read_file():
@@ -41,12 +47,39 @@ def get_page(url):
 
     dr = webdriver.Chrome(options=options)
     dr.get(url)
-    # bs = BeautifulSoup(dr.page_source, "lxml")
-    with open("source_code.html", "w", encoding="utf-8") as f:
-        f.write(dr.page_source)
+
+    if WRITE_SOURCE_TO_FILE:
+        with open("source_code.html", "w", encoding="utf-8") as f:
+            f.write(dr.page_source)
 
     # print(dr.page_source)
     return dr.page_source
+
+
+def get_game_status(game_name):
+    page = get_page(BASE_URL + game_name)
+
+    if "User reports indicate problems" in page:
+        return "Problems"
+    elif "User reports indicate possible problems" in page:
+        return "Possible problems"
+    elif "User reports indicate no current problems" in page:
+        return "No problems"
+    else:
+        return "No idea"
+
+
+async def send_game_status(game_name, channel):
+    print(f"Sending status for {game_name}")
+    status = get_game_status(game_name)
+    print(f"Got status for {game_name}")
+
+    status = f"{format_game_name(game_name)}: {status}"
+    print(status)
+
+    # asyncio.run(channel.send(status))
+#     WHAT TO DO HERE
+    await channel.send(status)
 
 
 @client.event
@@ -64,22 +97,18 @@ async def on_message(message):
         read_file()
         print(tracked_games)
 
-        await message.channel.send("Checking statuses of all tracked games")
+        msg_len = len(message.content.split())
+        if msg_len == 1:
+            await message.channel.send("Checking statuses of all tracked games")
 
-        for game_name in tracked_games:
-            page = get_page(BASE_URL + game_name)
-            status = f"{game_name}: "
+            for game_name in tracked_games:
+                Thread(target=lambda: asyncio.run_coroutine_threadsafe(send_game_status(game_name, message.channel),
+                                                                       client.loop)).start()
 
-            if "User reports indicate problems" in page:
-                status += "Problems"
-            elif "User reports indicate possible problems" in page:
-                status += "Possible problems"
-            elif "User reports indicate no current problems" in page:
-                status += "No problems"
-            else:
-                status += "No idea"
-
-            await message.channel.send(status)
+        elif msg_len > 1:
+            game_name = message.content.split(" ")[1]
+            Thread(target=lambda: asyncio.run_coroutine_threadsafe(send_game_status(game_name, message.channel),
+                                                                   client.loop)).start()
 
     if message.content.startswith('!ping'):
         await message.channel.send('pong')
@@ -90,8 +119,39 @@ async def on_message(message):
             f.write(game_name + "\n")
         await message.channel.send("Added game")
 
+    if message.content.startswith('!remove'):
+        game_name = message.content.split(" ")[1]
+        with open(tracked_games_file_name, "r") as f:
+            lines = f.readlines()
+        with open(tracked_games_file_name, "w") as f:
+            for line in lines:
+                if line.strip() != game_name:
+                    f.write(line)
+        await message.channel.send("Removed game" + game_name)
+
+    if message.content.startswith('!list'):
+        read_file()
+        await message.channel.send("List of tracked games")
+        for game_name in tracked_games:
+            await message.channel.send(game_name)
+
+    if message.content.startswith('!clear'):
+        with open(tracked_games_file_name, "w"):
+            pass
+        await message.channel.send("Cleared file")
+
+    if message.content.startswith('!help'):
+        await message.channel.send("Commands: !status, !ping, !add, !remove, !list, !help, !clear")
+
+
+create_file()
+tracked_games = []
+
+executor = ThreadPoolExecutor()
+
 client.run(TOKEN)
 
+# Statuses:
 # User reports indicate problems
 # User reports indicate possible problems
 # User reports indicate no current problems
